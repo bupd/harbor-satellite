@@ -53,6 +53,8 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	WriteJSONResponse(w, http.StatusOK, map[string]string{"status": "healthy"})
 }
 
+// Group Sync Handler takes in the information about the state artifact and creates a group in the database with this information.
+// The request body should contain the group name, registry and the images/artifacts with their respective repositories.
 func (s *Server) groupsSyncHandler(w http.ResponseWriter, r *http.Request) {
 	var req models.StateArtifact
 	if err := DecodeRequestBody(r, &req); err != nil {
@@ -73,13 +75,10 @@ func (s *Server) groupsSyncHandler(w http.ResponseWriter, r *http.Request) {
 	q := s.dbQueries.WithTx(tx)
 	// Ensure proper transaction handling with defer
 	defer func() {
-		if p := recover(); p != nil {
-			// If there's a panic, rollback the transaction
-			tx.Rollback()
-		} else if err != nil {
-			tx.Rollback() // Rollback transaction on error
-		}
-	}()
+        if p := recover(); p != nil {
+            tx.Rollback()
+        }
+    }()
 	projects := utils.GetProjectNames(&req.Artifacts)
 	params := database.CreateGroupParams{
 		GroupName:   req.Group,
@@ -117,19 +116,11 @@ func (s *Server) groupsSyncHandler(w http.ResponseWriter, r *http.Request) {
 
 	// check if project satellite exists and if does not exist create project satellite
 	satExist, err := harbor.GetProject(r.Context(), "satellite")
-	if err != nil {
-		log.Println(err)
-		err := &AppError{
-			Message: fmt.Sprintf("Error: Checking satellite project: %v", err),
-			Code:    http.StatusBadGateway,
-		}
-		HandleAppError(w, err)
-		tx.Rollback()
-		return
-	}
-	if !satExist {
-		_, err := harbor.CreateSatelliteProject(r.Context())
-		if err != nil {
+	if err != nil && !satExist {
+		log.Printf("error: checking satellite project: %v", err)
+		log.Printf("Attempting to create satellite project ...")
+		projectStatus, err := harbor.CreateSatelliteProject(r.Context())
+		if err != nil || !projectStatus {
 			log.Println(err)
 			err := &AppError{
 				Message: fmt.Sprintf("Error: creating satellite project: %v", err),
@@ -138,10 +129,10 @@ func (s *Server) groupsSyncHandler(w http.ResponseWriter, r *http.Request) {
 			HandleAppError(w, err)
 			tx.Rollback()
 			return
-		}
+		}		
 	}
 
-	// Create State Artifact for the group
+	// pushes the state artifact to the harbor registry under the satellite repository with the project name as group name 
 	err = utils.CreateStateArtifact(&req)
 	if err != nil {
 		log.Println(err)
@@ -164,14 +155,14 @@ func (s *Server) registerSatelliteHandler(w http.ResponseWriter, r *http.Request
 	if len(req.Name) < 1 {
 		log.Println("name should be atleast one character long.")
 		err := &AppError{
-			Message: fmt.Sprintf("Error: name should be atleast one character long."),
+			Message: "Error: name should be atleast one character long.",
 			Code:    http.StatusBadRequest,
 		}
 		HandleAppError(w, err)
 		return
 	}
 
-	roboPresent, err := harbor.IsRobotPresent(r.Context(), req.Name)
+	isRobotPresent, err := harbor.IsRobotPresent(r.Context(), req.Name)
 	if err != nil {
 		log.Println(err)
 		err := &AppError{
@@ -182,9 +173,9 @@ func (s *Server) registerSatelliteHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if roboPresent {
+	if isRobotPresent {
 		err := &AppError{
-			Message: fmt.Sprintf("Error: Robot Account name already present. Try with different name"),
+			Message: "Error: Robot Account name already present. Try with different name",
 			Code:    http.StatusBadRequest,
 		}
 		HandleAppError(w, err)
@@ -492,7 +483,7 @@ func (s *Server) DeleteSatelliteByName(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	satellite := vars["satellite"]
 
-  sat, err := s.dbQueries.GetSatelliteByName(r.Context(), satellite)
+	sat, err := s.dbQueries.GetSatelliteByName(r.Context(), satellite)
 	if err != nil {
 		log.Printf("error: failed to get satellite by name: %v", err)
 		err := &AppError{
@@ -502,7 +493,7 @@ func (s *Server) DeleteSatelliteByName(w http.ResponseWriter, r *http.Request) {
 		HandleAppError(w, err)
 		return
 	}
-  robotAcc, err := s.dbQueries.GetRobotAccBySatelliteID(r.Context(), sat.ID)
+	robotAcc, err := s.dbQueries.GetRobotAccBySatelliteID(r.Context(), sat.ID)
 	if err != nil {
 		log.Printf("error: robotAcc for satellite does not exist: %v", err)
 		err := &AppError{
@@ -513,7 +504,7 @@ func (s *Server) DeleteSatelliteByName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-  robotID, err := strconv.ParseInt(robotAcc.RobotID, 10, 64)
+	robotID, err := strconv.ParseInt(robotAcc.RobotID, 10, 64)
 	if err != nil {
 		log.Printf("error: Invalid robot ID: %v", err)
 		err := &AppError{
@@ -524,7 +515,7 @@ func (s *Server) DeleteSatelliteByName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-  _, err = harbor.DeleteRobotAccount(r.Context(), robotID)
+	_, err = harbor.DeleteRobotAccount(r.Context(), robotID)
 	if err != nil {
 		log.Printf("error: failed to delete robot account: %v", err)
 		err := &AppError{
