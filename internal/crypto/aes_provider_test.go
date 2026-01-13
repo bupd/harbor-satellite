@@ -231,6 +231,43 @@ func TestAESProvider_DeriveKeyDifferentSalts(t *testing.T) {
 	require.NotEqual(t, key1, key2, "different salts should produce different keys")
 }
 
+func TestAESProvider_DeriveKeyMinimumEntropy(t *testing.T) {
+	p := NewAESProvider()
+
+	// Derive a key and check it has sufficient entropy
+	// A good key should have bytes distributed across the range
+	key, err := p.DeriveKey([]byte("device-fingerprint-abc123"), []byte("salt"), 32)
+	require.NoError(t, err)
+
+	// Check that key is not all zeros
+	allZeros := true
+	for _, b := range key {
+		if b != 0 {
+			allZeros = false
+			break
+		}
+	}
+	require.False(t, allZeros, "key should not be all zeros")
+
+	// Check that key is not all same byte
+	allSame := true
+	first := key[0]
+	for _, b := range key[1:] {
+		if b != first {
+			allSame = false
+			break
+		}
+	}
+	require.False(t, allSame, "key should not be all same byte")
+
+	// Check byte distribution - at least 16 unique bytes in a 32-byte key
+	uniqueBytes := make(map[byte]bool)
+	for _, b := range key {
+		uniqueBytes[b] = true
+	}
+	require.GreaterOrEqual(t, len(uniqueBytes), 16, "key should have at least 16 unique bytes")
+}
+
 func TestAESProvider_Hash(t *testing.T) {
 	p := NewAESProvider()
 
