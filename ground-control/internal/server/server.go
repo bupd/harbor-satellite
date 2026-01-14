@@ -15,12 +15,14 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/container-registry/harbor-satellite/ground-control/internal/database"
+	"github.com/container-registry/harbor-satellite/ground-control/internal/middleware"
 )
 
 type Server struct {
-	port      int
-	db        *sql.DB
-	dbQueries *database.Queries
+	port        int
+	db          *sql.DB
+	dbQueries   *database.Queries
+	rateLimiter *middleware.RateLimiter
 }
 
 // TLSConfig holds TLS settings for the server.
@@ -33,8 +35,9 @@ type TLSConfig struct {
 
 // ServerResult contains the http.Server and TLS configuration.
 type ServerResult struct {
-	Server    *http.Server
-	TLSConfig *TLSConfig
+	Server      *http.Server
+	TLSConfig   *TLSConfig
+	CertWatcher *middleware.CertWatcher
 }
 
 var (
@@ -67,10 +70,14 @@ func NewServer() *ServerResult {
 
 	dbQueries := database.New(db)
 
+	// Initialize rate limiter: 10 requests per minute per IP for ZTR endpoint
+	rateLimiter := middleware.NewRateLimiter(10, time.Minute)
+
 	newServer := &Server{
-		port:      port,
-		db:        db,
-		dbQueries: dbQueries,
+		port:        port,
+		db:          db,
+		dbQueries:   dbQueries,
+		rateLimiter: rateLimiter,
 	}
 
 	tlsCfg := loadTLSConfig()
@@ -83,17 +90,31 @@ func NewServer() *ServerResult {
 		WriteTimeout: 30 * time.Second,
 	}
 
+	var certWatcher *middleware.CertWatcher
+
 	if tlsCfg.Enabled {
-		tlsConfig, err := buildServerTLSConfig(tlsCfg)
+		// Create certificate watcher for hot-reload
+		var err error
+		certWatcher, err = middleware.NewCertWatcher(tlsCfg.CertFile, tlsCfg.KeyFile)
+		if err != nil {
+			log.Fatalf("Failed to create certificate watcher: %v", err)
+		}
+
+		tlsConfig, err := buildServerTLSConfigWithWatcher(tlsCfg, certWatcher)
 		if err != nil {
 			log.Fatalf("Failed to load TLS config: %v", err)
 		}
 		httpServer.TLSConfig = tlsConfig
+
+		// Start watching for certificate changes (check every 30 seconds)
+		certWatcher.Start(30 * time.Second)
+		log.Println("Certificate watcher started for TLS hot-reload")
 	}
 
 	return &ServerResult{
-		Server:    httpServer,
-		TLSConfig: tlsCfg,
+		Server:      httpServer,
+		TLSConfig:   tlsCfg,
+		CertWatcher: certWatcher,
 	}
 }
 
@@ -112,15 +133,12 @@ func loadTLSConfig() *TLSConfig {
 	}
 }
 
-func buildServerTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
-	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("load certificate: %w", err)
-	}
-
+// buildServerTLSConfigWithWatcher creates a TLS config that uses the certificate watcher
+// for dynamic certificate reloading.
+func buildServerTLSConfigWithWatcher(cfg *TLSConfig, cw *middleware.CertWatcher) (*tls.Config, error) {
 	tlsConfig := &tls.Config{
-		MinVersion:   tls.VersionTLS12,
-		Certificates: []tls.Certificate{cert},
+		MinVersion:     tls.VersionTLS12,
+		GetCertificate: cw.GetCertificate,
 	}
 
 	if cfg.CAFile != "" {

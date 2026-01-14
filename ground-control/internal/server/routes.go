@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 
+	"github.com/container-registry/harbor-satellite/ground-control/internal/middleware"
 	"github.com/gorilla/mux"
 )
 
@@ -33,10 +34,13 @@ func (s *Server) RegisterRoutes() http.Handler {
 	// Satellites
 	r.HandleFunc("/satellites", s.listSatelliteHandler).Methods("GET")      // List all satellites
 	r.HandleFunc("/satellites", s.registerSatelliteHandler).Methods("POST") // Register new satellite
-	r.HandleFunc("/satellites/ztr/{token}", s.ztrHandler).Methods("GET")
 	r.HandleFunc("/satellites/{satellite}", s.GetSatelliteByName).Methods("GET")       // Get specific satellite
 	r.HandleFunc("/satellites/{satellite}", s.DeleteSatelliteByName).Methods("DELETE") // Delete specific satellite
-	// r.HandleFunc("/satellites/{satellite}/images", s.GetImagesForSatellite).Methods("GET") // Get satellite images
+
+	// ZTR endpoint with rate limiting (10 requests per minute per IP)
+	ztrSubrouter := r.PathPrefix("/satellites/ztr").Subrouter()
+	ztrSubrouter.Use(middleware.RateLimitMiddleware(s.rateLimiter))
+	ztrSubrouter.HandleFunc("/{token}", s.ztrHandler).Methods("GET")
 
 	return r
 }
