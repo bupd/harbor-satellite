@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/container-registry/harbor-satellite/ground-control/internal/database"
 	"github.com/container-registry/harbor-satellite/ground-control/internal/utils"
@@ -186,7 +187,7 @@ func (s *Server) registerSatelliteHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Add token to DB
+	// Add token to DB with 24-hour expiry
 	token, err := GenerateRandomToken(32)
 	if err != nil {
 		log.Println(err)
@@ -194,9 +195,11 @@ func (s *Server) registerSatelliteHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	tokenExpiry := time.Now().Add(24 * time.Hour)
 	tk, err := q.AddToken(r.Context(), database.AddTokenParams{
 		SatelliteID: satellite.ID,
 		Token:       token,
+		ExpiresAt:   tokenExpiry,
 	})
 	if err != nil {
 		log.Println("error in token")
