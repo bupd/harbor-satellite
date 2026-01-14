@@ -65,7 +65,12 @@ func waitForPostgresReady(db *sql.DB, timeout time.Duration) {
 }
 
 func runMigrations(db *sql.DB) {
-	provider, err := goose.NewProvider(goose.DialectPostgres, db, os.DirFS("/migrations"))
+	migrationsPath := "/migrations"
+	if _, err := os.Stat(migrationsPath); os.IsNotExist(err) {
+		migrationsPath = "sql/schema"
+	}
+
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, os.DirFS(migrationsPath))
 	if err != nil {
 		log.Fatalf("failed to create goose provider: %v", err)
 	}

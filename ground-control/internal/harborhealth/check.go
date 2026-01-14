@@ -21,8 +21,10 @@ func defaultConfig() *config {
 		HarborURL: os.Getenv("HARBOR_URL"),
 		Timeout:   5 * time.Second,
 		SkipComponents: map[string]struct{}{
-			"portal": {},
-			"trivy":  {},
+			"portal":      {},
+			"trivy":       {},
+			"registryctl": {},
+			"jobservice":  {},
 		},
 	}
 }

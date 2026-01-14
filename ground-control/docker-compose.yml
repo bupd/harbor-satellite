@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:latest
+    image: postgres:16
     container_name: groundcontrol-db
     environment:
       POSTGRES_DB: groundcontrol
@@ -9,7 +9,7 @@ services:
     ports:
       - "8100:5432"
     volumes:
-      - ./db:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
 
   groundcontrol:
     image: 8gears.container-registry.com/harbor-satellite/ground-control:test
@@ -31,4 +31,4 @@ services:
       # - db-migrator
 
 volumes:
-  db:
+  pgdata:
