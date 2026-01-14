@@ -25,15 +25,25 @@ func main() {
 	}
 
 	migrator.DoMigrations()
-	server := server.NewServer()
+	serverResult := server.NewServer()
+	httpServer := serverResult.Server
+	tlsCfg := serverResult.TLSConfig
 
 	go func() {
-		if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if tlsCfg.Enabled {
+			fmt.Printf("Starting Ground Control with TLS on port %s\n", httpServer.Addr)
+			err = httpServer.ListenAndServeTLS(tlsCfg.CertFile, tlsCfg.KeyFile)
+		} else {
+			fmt.Printf("Starting Ground Control on port %s\n", httpServer.Addr)
+			err = httpServer.ListenAndServe()
+		}
+		if !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("cannot start server: %s", err)
 		}
 	}()
 
-	fmt.Printf("Ground Control running on port %s\n", server.Addr)
+	fmt.Printf("Ground Control running on port %s\n", httpServer.Addr)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -42,7 +52,7 @@ func main() {
 	shutdownCtx, shutdownRelease := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownRelease()
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("HTTP shutdown error: %v", err)
 	}
 }
