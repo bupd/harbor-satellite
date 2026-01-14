@@ -141,3 +141,15 @@ func (cm *ConfigManager) GetConfig() *Config {
 	defer cm.mu.RUnlock()
 	return cm.config
 }
+
+func (cm *ConfigManager) GetTLSConfig() TLSConfig {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return cm.config.AppConfig.TLS
+}
+
+func (cm *ConfigManager) ShouldEncryptConfig() bool {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return cm.config.AppConfig.EncryptConfig
+}

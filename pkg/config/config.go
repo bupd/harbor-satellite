@@ -14,6 +14,14 @@ type RegistryCredentials struct {
 	Password string `json:"password,omitempty"`
 }
 
+// TLSConfig holds TLS settings for secure connections.
+type TLSConfig struct {
+	CertFile   string `json:"cert_file,omitempty"`
+	KeyFile    string `json:"key_file,omitempty"`
+	CAFile     string `json:"ca_file,omitempty"`
+	SkipVerify bool   `json:"skip_verify,omitempty"`
+}
+
 type AppConfig struct {
 	GroundControlURL          URL                 `json:"ground_control_url,omitempty"`
 	LogLevel                  string              `json:"log_level,omitempty"`
@@ -22,6 +30,8 @@ type AppConfig struct {
 	RegisterSatelliteInterval string              `json:"register_satellite_interval,omitempty"`
 	BringOwnRegistry          bool                `json:"bring_own_registry,omitempty"`
 	LocalRegistryCredentials  RegistryCredentials `json:"local_registry,omitempty"`
+	TLS                       TLSConfig           `json:"tls,omitempty"`
+	EncryptConfig             bool                `json:"encrypt_config,omitempty"`
 }
 
 type StateConfig struct {
