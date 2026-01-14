@@ -231,20 +231,30 @@ func (s *Server) ztrHandler(w http.ResponseWriter, r *http.Request) {
 
 	q := s.dbQueries
 
-	satelliteID, err := q.GetSatelliteIDByToken(r.Context(), token)
+	// Get full token info including expiry
+	tokenInfo, err := q.GetTokenByValue(r.Context(), token)
 	if err != nil {
-		masked := fmt.Sprintf("%s…%s",
-			token[:4],
-			token[len(token)-4:],
-		)
+		masked := maskToken(token)
 		log.Printf("Invalid Satellite Token %s: %v", masked, err)
-		err := &AppError{
+		HandleAppError(w, &AppError{
 			Message: "Error: Invalid Token",
 			Code:    http.StatusBadRequest,
-		}
-		HandleAppError(w, err)
+		})
 		return
 	}
+
+	// Validate token expiry
+	if time.Now().After(tokenInfo.ExpiresAt) {
+		masked := maskToken(token)
+		log.Printf("Expired Satellite Token %s (expired at %v)", masked, tokenInfo.ExpiresAt)
+		HandleAppError(w, &AppError{
+			Message: "Error: Token Expired",
+			Code:    http.StatusUnauthorized,
+		})
+		return
+	}
+
+	satelliteID := tokenInfo.SatelliteID
 
 	robot, err := q.GetRobotAccBySatelliteID(r.Context(), satelliteID)
 	if err != nil {
