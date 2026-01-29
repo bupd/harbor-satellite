@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"time"
-
 	"os"
 
 	runtime "github.com/container-registry/harbor-satellite/internal/container_runtime"
@@ -262,6 +261,10 @@ func run(opts SatelliteOptions, pathConfig *config.PathConfig, shutdownTimeout s
 		}
 	}
 
+	return gracefulShutdown(ctx, log, s, wg, shutdownTimeout)
+}
+
+func gracefulShutdown(ctx context.Context, log *zerolog.Logger, s *satellite.Satellite, wg *errgroup.Group, shutdownTimeout string) error {
 	// Wait until context is cancelled
 	<-ctx.Done()
 
