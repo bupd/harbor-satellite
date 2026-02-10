@@ -249,7 +249,7 @@ func run(opts SatelliteOptions, pathConfig *config.PathConfig, shutdownTimeout s
 		}
 	})
 
-	s := satellite.NewSatellite(cm)
+	s := satellite.NewSatellite(cm, pathConfig.StateFile)
 	err = s.Run(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to start satellite: %w", err)
