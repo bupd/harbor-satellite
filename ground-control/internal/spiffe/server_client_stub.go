@@ -22,7 +22,7 @@ func (c *ServerClient) CreateJoinToken(_ context.Context, _ string, _ time.Durat
 }
 
 // CreateWorkloadEntry is not available in nospiffe builds.
-func (c *ServerClient) CreateWorkloadEntry(_ context.Context, _, _ string, _ []string) (string, error) {
+func (c *ServerClient) CreateWorkloadEntry(_ context.Context, _, _ string, _ []string, _ ...string) (string, error) {
 	return "", fmt.Errorf("SPIFFE support not compiled in (nospiffe build)")
 }
 

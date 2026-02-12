@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-test
+  labels:
+    app: nginx-test
+spec:
+  containers:
+    - name: nginx
+      image: localhost:8585/library/nginx:alpine
+      ports:
+        - containerPort: 80

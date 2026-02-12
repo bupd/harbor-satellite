@@ -68,6 +68,9 @@ docker exec spire-server /opt/spire/bin/spire-server entry create \
     -parentID "$GC_AGENT_ID" \
     -spiffeID spiffe://harbor-satellite.local/ground-control \
     -selector docker:label:com.docker.compose.service:ground-control \
+    -dns localhost \
+    -dns ground-control \
+    -dns host.docker.internal \
     -socketPath /tmp/spire-server/private/api.sock || true
 
 # Step 5: Start Ground Control

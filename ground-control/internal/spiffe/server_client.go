@@ -75,8 +75,9 @@ func (c *ServerClient) CreateJoinToken(ctx context.Context, spiffeID string, ttl
 
 // CreateWorkloadEntry creates a registration entry for a workload.
 // The entry associates a SPIFFE ID with selectors that identify the workload.
+// Optional dnsNames are added to the X.509 SVID as Subject Alternative Names.
 // Returns the entry ID for cleanup on failure.
-func (c *ServerClient) CreateWorkloadEntry(ctx context.Context, parentID, spiffeID string, selectors []string) (string, error) {
+func (c *ServerClient) CreateWorkloadEntry(ctx context.Context, parentID, spiffeID string, selectors []string, dnsNames ...string) (string, error) {
 	parentPath := extractPath(parentID, c.trustDomain.String())
 	workloadPath := extractPath(spiffeID, c.trustDomain.String())
 
@@ -92,20 +93,21 @@ func (c *ServerClient) CreateWorkloadEntry(ctx context.Context, parentID, spiffe
 		})
 	}
 
-	resp, err := c.entryClient.BatchCreateEntry(ctx, &entryv1.BatchCreateEntryRequest{
-		Entries: []*typesv1.Entry{
-			{
-				ParentId: &typesv1.SPIFFEID{
-					TrustDomain: c.trustDomain.String(),
-					Path:        parentPath,
-				},
-				SpiffeId: &typesv1.SPIFFEID{
-					TrustDomain: c.trustDomain.String(),
-					Path:        workloadPath,
-				},
-				Selectors: selectorList,
-			},
+	entry := &typesv1.Entry{
+		ParentId: &typesv1.SPIFFEID{
+			TrustDomain: c.trustDomain.String(),
+			Path:        parentPath,
 		},
+		SpiffeId: &typesv1.SPIFFEID{
+			TrustDomain: c.trustDomain.String(),
+			Path:        workloadPath,
+		},
+		Selectors: selectorList,
+		DnsNames:  dnsNames,
+	}
+
+	resp, err := c.entryClient.BatchCreateEntry(ctx, &entryv1.BatchCreateEntryRequest{
+		Entries: []*typesv1.Entry{entry},
 	})
 	if err != nil {
 		return "", fmt.Errorf("create workload entry: %w", err)
