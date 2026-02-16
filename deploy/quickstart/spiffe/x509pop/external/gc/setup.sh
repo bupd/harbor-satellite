@@ -14,6 +14,10 @@ echo "[1/5] Generating X.509 certificates..."
 
 # Step 2: Start infrastructure
 echo "[2/5] Starting PostgreSQL and SPIRE server..."
+# Fix volume permissions: SPIRE server runs as UID 1000:1000 but Docker
+# creates named volumes owned by root. Ensure the data dir is writable.
+docker compose create spire-server
+docker run --rm --volumes-from spire-server alpine chown 1000:1000 /opt/spire/data/server
 docker compose up -d postgres spire-server
 echo "Waiting for SPIRE server to be healthy..."
 
@@ -32,6 +36,9 @@ done
 
 # Step 3: Start SPIRE agent (auto-attests with x509 certificate)
 echo "[3/5] Starting SPIRE agent for Ground Control (X.509 PoP)..."
+# Fix volume permissions for SPIRE agent (runs as UID 1000:1000)
+docker compose create spire-agent-gc
+docker run --rm --volumes-from spire-agent-gc alpine chown 1000:1000 /opt/spire/data/agent
 docker compose up -d spire-agent-gc
 
 echo "Waiting for agent to attest..."

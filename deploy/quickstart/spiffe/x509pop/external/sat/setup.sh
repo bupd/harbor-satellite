@@ -25,6 +25,9 @@ fi
 
 # Start satellite SPIRE agent first (must attest before we can register workload)
 echo "[2/4] Starting satellite SPIRE agent..."
+# Fix volume permissions for SPIRE agent (runs as UID 1000:1000)
+docker compose create spire-agent-satellite
+docker run --rm --volumes-from spire-agent-satellite alpine chown 1000:1000 /opt/spire/data/agent
 docker compose up -d spire-agent-satellite
 
 echo "Waiting for satellite agent to attest..."
