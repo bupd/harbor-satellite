@@ -11,7 +11,9 @@ import (
 	runtime "github.com/container-registry/harbor-satellite/internal/container_runtime"
 	"github.com/container-registry/harbor-satellite/internal/hotreload"
 	"github.com/container-registry/harbor-satellite/internal/logger"
+	"github.com/container-registry/harbor-satellite/internal/parsec"
 	"github.com/container-registry/harbor-satellite/internal/registry"
+	"github.com/container-registry/harbor-satellite/internal/crypto"
 	"github.com/container-registry/harbor-satellite/internal/satellite"
 	"github.com/container-registry/harbor-satellite/internal/utils"
 	"github.com/container-registry/harbor-satellite/internal/watcher"
@@ -54,8 +56,9 @@ type SatelliteOptions struct {
 	NoRegistryFallback     bool
 	FallbackOnly           bool
 	HarborRegistryURL      string
-	DirectDelivery         bool
-	ImageDir               string
+	// PARSEC hardware-backed identity (optional; requires parsec build tag and running daemon)
+	ParsecEnabled    bool
+	ParsecSocketPath string
 }
 
 func main() {
@@ -80,8 +83,8 @@ func main() {
 	flag.BoolVar(&opts.NoRegistryFallback, "no-registry-fallback", false, "Disable all CRI registry fallback configuration")
 	flag.BoolVar(&opts.FallbackOnly, "fallback-only", false, "Apply CRI registry fallback configs and exit without starting satellite")
 	flag.StringVar(&opts.HarborRegistryURL, "harbor-registry-url", "", "Override Harbor registry URL from Ground Control (e.g., http://10.0.0.1:8080)")
-	flag.BoolVar(&opts.DirectDelivery, "direct-delivery", false, "[Experimental] Write image tarballs directly to k3s/RKE2 agent images directory")
-	flag.StringVar(&opts.ImageDir, "image-dir", "", "Override image directory for direct delivery (auto-detected if empty)")
+	flag.BoolVar(&opts.ParsecEnabled, "parsec-enabled", false, "Enable hardware-backed identity via PARSEC (requires parsec build tag and running PARSEC daemon)")
+	flag.StringVar(&opts.ParsecSocketPath, "parsec-socket", parsec.DefaultSocketPath, "PARSEC daemon socket path")
 
 	flag.Parse()
 
@@ -133,11 +136,11 @@ func main() {
 	if opts.HarborRegistryURL == "" {
 		opts.HarborRegistryURL = os.Getenv("HARBOR_REGISTRY_URL")
 	}
-	if !opts.DirectDelivery && os.Getenv("DIRECT_DELIVERY") == "true" {
-		opts.DirectDelivery = true
+	if !opts.ParsecEnabled && os.Getenv("PARSEC_ENABLED") == "true" {
+		opts.ParsecEnabled = true
 	}
-	if opts.ImageDir == "" {
-		opts.ImageDir = os.Getenv("IMAGE_DIR")
+	if opts.ParsecSocketPath == parsec.DefaultSocketPath && os.Getenv("PARSEC_SOCKET") != "" {
+		opts.ParsecSocketPath = os.Getenv("PARSEC_SOCKET")
 	}
 
 	// Resolve config directory path
@@ -195,11 +198,39 @@ func run(opts SatelliteOptions, pathConfig *config.PathConfig, shutdownTimeout s
 	ctx, cancel := utils.SetupContext(context.Background())
 	defer cancel()
 	wg, ctx := errgroup.WithContext(ctx)
+    
+	var cryptoProvider crypto.Provider
+	var err error
 
-	cm, warnings, err := config.InitConfigManager(opts.Token, opts.GroundControlURL, pathConfig.ConfigFile, pathConfig.PrevConfigFile, opts.JSONLogging, opts.UseUnsecure)
+	if opts.ParsecEnabled {
+		// Fail-hard if they asked for hardware security but it's offline
+		if err := parsec.MustDetect(opts.ParsecSocketPath); err != nil {
+			return fmt.Errorf("parsec startup check failed: %w", err)
+		}
+		// Create the hardware provider
+		cryptoProvider, err = parsec.NewKeyProvider(opts.ParsecSocketPath)
+		if err != nil {
+			return fmt.Errorf("failed to init parsec provider: %w", err)
+		}
+	} else {
+		// Fallback to software security if PARSEC is disabled
+		cryptoProvider = crypto.NewAESProvider()
+	}
+
+	// Now pass our provider into the config manager
+	cm, warnings, err := config.InitConfigManager(opts.Token, opts.GroundControlURL, pathConfig.ConfigFile, pathConfig.PrevConfigFile, opts.JSONLogging, opts.UseUnsecure, cryptoProvider)
 	if err != nil {
 		fmt.Printf("Error initiating the config manager: %v\n", err)
 		return err
+	}
+
+	// Validate PARSEC daemon reachability when hardware-backed identity is requested.
+	// Like SPIFFE, this is fail-hard: if the operator asked for hardware security and
+	// the daemon is unreachable, we halt rather than silently degrade.
+	if opts.ParsecEnabled {
+		if err := parsec.MustDetect(opts.ParsecSocketPath); err != nil {
+			return fmt.Errorf("parsec startup check failed: %w", err)
+		}
 	}
 
 	// Apply SPIFFE config from CLI flags
@@ -261,25 +292,6 @@ func run(opts SatelliteOptions, pathConfig *config.PathConfig, shutdownTimeout s
 	if opts.FallbackOnly {
 		fmt.Println("--fallback-only: CRI configs applied, exiting.")
 		return nil
-	}
-
-	// Configure direct delivery if enabled (after fallback-only exit)
-	if opts.DirectDelivery {
-		imageDir := opts.ImageDir
-		if imageDir == "" {
-			imageDir = runtime.DetectImageDir()
-		}
-		if imageDir == "" {
-			return fmt.Errorf("--direct-delivery enabled but no k3s/RKE2 image directory found; use --image-dir to specify one")
-		}
-		if err := os.MkdirAll(imageDir, 0o755); err != nil {
-			return fmt.Errorf("create image directory %s: %w", imageDir, err)
-		}
-		cm.With(config.SetDirectDelivery(config.DirectDeliveryConfig{
-			Enabled:  true,
-			ImageDir: imageDir,
-		}))
-		fmt.Printf("EXPERIMENTAL: direct delivery enabled, images will be written to %s\n", imageDir)
 	}
 
 	ctx, log := logger.InitLogger(ctx, cm.GetLogLevel(), opts.JSONLogging, warnings)
