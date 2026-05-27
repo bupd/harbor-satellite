@@ -21,7 +21,6 @@ package parsec
 
 import (
 	"crypto"
-	"crypto/sha256"
 	"crypto/x509"
 	"fmt"
 	"io"
@@ -80,15 +79,27 @@ func (s *Signer) Public() crypto.PublicKey {
 }
 
 // Sign delegates the signing operation to the PARSEC hardware.
-// The digest is signed directly (PARSEC PsaSignHash); the rand reader is
-// ignored because the hardware generates its own entropy.
-// Required by crypto.Signer.
+//
+// Per the crypto.Signer contract, `digest` is the (already-hashed) input to
+// the signature algorithm — never the raw message. This Signer is bound to
+// ECDSA-P256/SHA-256, so opts.HashFunc() (when non-nil) must be crypto.SHA256.
+// We do NOT re-hash, because the convention is:
+//   - opts.HashFunc() == crypto.Hash(0) means "raw signing" (Ed25519-style); the
+//     caller is supplying the bytes that must be signed verbatim.
+//   - opts.HashFunc() == crypto.SHA256 (or other) means the digest is already
+//     computed; the signer must not hash again.
+//
+// The previous implementation re-hashed when HashFunc() == 0, producing
+// signatures the peer cannot verify. The rand reader is ignored because the
+// hardware generates its own entropy.
 func (s *Signer) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
-	// If the caller passes a full message rather than a pre-hashed digest,
-	// hash it first. Standard TLS always passes a pre-hashed digest.
-	if opts != nil && opts.HashFunc() == crypto.Hash(0) {
-		h := sha256.Sum256(digest)
-		digest = h[:]
+	if opts != nil {
+		if h := opts.HashFunc(); h != crypto.Hash(0) && h != crypto.SHA256 {
+			return nil, fmt.Errorf("parsec signer is bound to ECDSA-P256/SHA-256; caller requested %v", h)
+		}
+	}
+	if len(digest) != 32 {
+		return nil, fmt.Errorf("parsec signer expects a 32-byte SHA-256 digest, got %d bytes", len(digest))
 	}
 
 	sig, err := s.client.PsaSignHash(s.keyName, digest, s.sigAlg)

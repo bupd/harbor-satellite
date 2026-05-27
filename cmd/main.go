@@ -9,11 +9,11 @@ import (
 	"time"
 
 	runtime "github.com/container-registry/harbor-satellite/internal/container_runtime"
+	"github.com/container-registry/harbor-satellite/internal/crypto"
 	"github.com/container-registry/harbor-satellite/internal/hotreload"
 	"github.com/container-registry/harbor-satellite/internal/logger"
 	"github.com/container-registry/harbor-satellite/internal/parsec"
 	"github.com/container-registry/harbor-satellite/internal/registry"
-	"github.com/container-registry/harbor-satellite/internal/crypto"
 	"github.com/container-registry/harbor-satellite/internal/satellite"
 	"github.com/container-registry/harbor-satellite/internal/utils"
 	"github.com/container-registry/harbor-satellite/internal/watcher"
@@ -198,39 +198,29 @@ func run(opts SatelliteOptions, pathConfig *config.PathConfig, shutdownTimeout s
 	ctx, cancel := utils.SetupContext(context.Background())
 	defer cancel()
 	wg, ctx := errgroup.WithContext(ctx)
-    
+
+	// Select the crypto provider. Per ADR-0007, PARSEC mode is fail-hard:
+	// if the operator opted in via --parsec-enabled and the daemon is not
+	// reachable, the satellite halts rather than silently downgrading to the
+	// software AES provider.
 	var cryptoProvider crypto.Provider
 	var err error
-
 	if opts.ParsecEnabled {
-		// Fail-hard if they asked for hardware security but it's offline
 		if err := parsec.MustDetect(opts.ParsecSocketPath); err != nil {
 			return fmt.Errorf("parsec startup check failed: %w", err)
 		}
-		// Create the hardware provider
 		cryptoProvider, err = parsec.NewKeyProvider(opts.ParsecSocketPath)
 		if err != nil {
 			return fmt.Errorf("failed to init parsec provider: %w", err)
 		}
 	} else {
-		// Fallback to software security if PARSEC is disabled
 		cryptoProvider = crypto.NewAESProvider()
 	}
 
-	// Now pass our provider into the config manager
 	cm, warnings, err := config.InitConfigManager(opts.Token, opts.GroundControlURL, pathConfig.ConfigFile, pathConfig.PrevConfigFile, opts.JSONLogging, opts.UseUnsecure, cryptoProvider)
 	if err != nil {
 		fmt.Printf("Error initiating the config manager: %v\n", err)
 		return err
-	}
-
-	// Validate PARSEC daemon reachability when hardware-backed identity is requested.
-	// Like SPIFFE, this is fail-hard: if the operator asked for hardware security and
-	// the daemon is unreachable, we halt rather than silently degrade.
-	if opts.ParsecEnabled {
-		if err := parsec.MustDetect(opts.ParsecSocketPath); err != nil {
-			return fmt.Errorf("parsec startup check failed: %w", err)
-		}
 	}
 
 	// Apply SPIFFE config from CLI flags

@@ -23,7 +23,8 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"fmt"
-    
+	"os"
+
 	harborcrypto "github.com/container-registry/harbor-satellite/internal/crypto"
 	parsecclient "github.com/parallaxsecond/parsec-client-go/parsec"
 	"github.com/parallaxsecond/parsec-client-go/parsec/algorithm"
@@ -44,7 +45,18 @@ type KeyProvider struct {
 
 // NewKeyProvider creates a KeyProvider connected to the PARSEC daemon at socketPath.
 // Call MustDetect(socketPath) before this to get a clear error if the daemon is absent.
+//
+// parsec-client-go's NewClientConfig() reads the daemon endpoint from the
+// PARSEC_SERVICE_ENDPOINT environment variable. To make the operator-supplied
+// socketPath actually take effect (rather than silently falling back to the
+// daemon's compile-time default), set the env var here when an explicit path
+// is given.
 func NewKeyProvider(socketPath string) (*KeyProvider, error) {
+	if socketPath != "" {
+		if err := os.Setenv("PARSEC_SERVICE_ENDPOINT", "unix:"+socketPath); err != nil {
+			return nil, fmt.Errorf("set PARSEC_SERVICE_ENDPOINT: %w", err)
+		}
+	}
 	cfg := parsecclient.NewClientConfig()
 	client, err := parsecclient.CreateConfiguredClient(cfg)
 	if err != nil {
@@ -179,8 +191,13 @@ func (p *KeyProvider) RandomBytes(n int) ([]byte, error) {
 
 // --- internal key lifecycle ---
 
-// ensureIdentityKey generates the identity signing key if it does not already exist.
-// Uses ECDSA P-256 with SHA-256. The key is non-exportable (private key stays in hardware).
+// ensureIdentityKey generates the identity signing key if it does not already
+// exist. Uses ECDSA P-256 (NIST SECP256R1) with SHA-256. The key is
+// non-exportable (private key stays in hardware).
+//
+// This must match the algorithm hard-coded in Signer.NewSigner and in
+// KeyProvider.Sign / KeyProvider.Verify (all use Ecdsa-SHA256). Changing one
+// without the others will produce signatures the daemon rejects.
 func (p *KeyProvider) ensureIdentityKey() error {
 	// ListKeys to check if key already exists; if so, skip generation.
 	keys, err := p.client.ListKeys()
@@ -193,14 +210,33 @@ func (p *KeyProvider) ensureIdentityKey() error {
 		}
 	}
 
-	attrs := parsecclient.DefaultKeyAttribute().SigningKey()
+	attrs := &parsecclient.KeyAttributes{
+		KeyBits: 256,
+		KeyType: parsecclient.NewKeyType().EccKeyPair(parsecclient.KeyTypeSECPR1),
+		KeyPolicy: &parsecclient.KeyPolicy{
+			KeyAlgorithm: algorithm.NewAsymmetricSignature().Ecdsa(algorithm.HashAlgorithmTypeSHA256),
+			KeyUsageFlags: &parsecclient.UsageFlags{
+				SignHash:      true,
+				SignMessage:   true,
+				VerifyHash:    true,
+				VerifyMessage: true,
+			},
+		},
+	}
 	if err := p.client.PsaGenerateKey(identityKeyName, attrs); err != nil {
 		return fmt.Errorf("generate identity key in parsec: %w", err)
 	}
 	return nil
 }
 
-// ensureConfigSealKey is skipped until parsec-client-go adds AeadKey() support.
+// ensureConfigSealKey is a no-op until parsec-client-go adds AEAD key support.
+//
+// Phase-1 limitation: the satellite's config-sealing path still uses the
+// software AES provider (see KeyProvider.Encrypt / KeyProvider.Decrypt below).
+// This is called out as a known gap in ADR-0007 §"Phase-1 Limitations" and is
+// tracked separately. When parsec-client-go gains AEAD support, this function
+// should generate a non-exportable AES-256-GCM key under configSealKeyName and
+// Encrypt/Decrypt should be rewritten to use PsaAeadEncrypt/PsaAeadDecrypt.
 func (p *KeyProvider) ensureConfigSealKey() error {
 	return nil
 }

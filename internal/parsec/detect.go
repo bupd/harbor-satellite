@@ -4,6 +4,7 @@ package parsec
 
 import (
 	"fmt"
+	"os"
 
 	parsecclient "github.com/parallaxsecond/parsec-client-go/parsec"
 )
@@ -11,7 +12,17 @@ import (
 // Detect attempts to ping the PARSEC daemon at the given socket path.
 // Returns true if the daemon is reachable and responding.
 // This is a cheap connectivity check, not a full capability probe.
+//
+// parsec-client-go's NewClientConfig() reads the daemon endpoint from the
+// PARSEC_SERVICE_ENDPOINT environment variable, so we set that var to the
+// caller-supplied path before constructing the client. Without this the
+// socketPath argument is silently ignored.
 func Detect(socketPath string) bool {
+	if socketPath != "" {
+		if err := os.Setenv("PARSEC_SERVICE_ENDPOINT", "unix:"+socketPath); err != nil {
+			return false
+		}
+	}
 	cfg := parsecclient.NewClientConfig()
 	c, err := parsecclient.CreateConfiguredClient(cfg)
 	if err != nil {
