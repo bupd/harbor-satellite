@@ -7,6 +7,12 @@ on:
 jobs:
   lint:
     runs-on: container-registry
+    env:
+      # Point golangci-lint at a workspace-local cache directory. The
+      # default location (/home/runner/.cache) is not writable on the
+      # `container-registry` self-hosted runner, which caused the job to
+      # fail with `permission denied`. The workspace is always writable.
+      GOLANGCI_LINT_CACHE: ${{ github.workspace }}/.cache/golangci-lint
     permissions:
       contents: write
       packages: write
@@ -18,6 +24,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.24.11"
+          cache: false
 
       - name: Install Task
         uses: arduino/setup-task@v2
