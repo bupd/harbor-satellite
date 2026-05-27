@@ -152,6 +152,11 @@ func main() {
 	if opts.ParsecSocketPath == parsec.DefaultSocketPath && os.Getenv("PARSEC_SOCKET") != "" {
 		opts.ParsecSocketPath = os.Getenv("PARSEC_SOCKET")
 	}
+	// Surface PARSEC misconfiguration at startup rather than at the first hardware operation.
+	if err := (parsec.Config{Enabled: opts.ParsecEnabled, SocketPath: opts.ParsecSocketPath}).Validate(); err != nil {
+		fmt.Printf("Invalid PARSEC configuration: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Resolve config directory path
 	if opts.ConfigDir == "" {

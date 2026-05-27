@@ -14,6 +14,11 @@
 // is set, the satellite pings the socket at startup and halts if unreachable.
 package parsec
 
+import (
+	"fmt"
+	"path/filepath"
+)
+
 const (
 	// DefaultSocketPath is the standard PARSEC daemon socket location.
 	DefaultSocketPath = "/run/parsec/parsec.sock"
@@ -39,4 +44,20 @@ func DefaultConfig() Config {
 		Enabled:    false,
 		SocketPath: DefaultSocketPath,
 	}
+}
+
+// Validate checks that the configuration is internally consistent. Called from
+// pkg/config/validate.go so misconfiguration surfaces at startup rather than
+// at the first PARSEC operation.
+func (c Config) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if c.SocketPath == "" {
+		return fmt.Errorf("parsec: socket_path must not be empty when enabled (default: %q)", DefaultSocketPath)
+	}
+	if !filepath.IsAbs(c.SocketPath) {
+		return fmt.Errorf("parsec: socket_path must be absolute, got %q", c.SocketPath)
+	}
+	return nil
 }
